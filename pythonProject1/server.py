@@ -1,3 +1,4 @@
+#teamname: The house always acks
 import socket
 import threading
 import struct
@@ -129,7 +130,7 @@ class BlackjackServer:
 
     def handle_client(self, sock, addr):
         try:
-            sock.settimeout(3000)
+            sock.settimeout(30000)
             data = sock.recv(1024)
             if not data: return
 

@@ -84,7 +84,7 @@ class BlackjackEngine:
 
 
 class BlackjackServer:
-    def __init__(self, team_name="CyberCasino_7", max_connections=5):
+    def __init__(self, team_name="The house always acks", max_connections=5):
         self.team_name = team_name
         self.max_conn_limit = max(1, min(max_connections, 20))
         self.connection_semaphore = threading.Semaphore(self.max_conn_limit)

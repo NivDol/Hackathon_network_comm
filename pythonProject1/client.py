@@ -89,7 +89,7 @@ class BlackjackClient:
         self.cards_seen = 0
         self.waiting_for_hit_response = False
         self.game_active = False
-        self.dealer_first_card_str = ""  # Stores the face-up card to reprint later
+        self.dealer_first_card_str = ""
 
     def start(self):
         print(f"--- Client: {self.player_name} ---")
@@ -120,10 +120,13 @@ class BlackjackClient:
             magic, m_type, port, name_b = struct.unpack('!I B H 32s', data[:Protocol.SIZE_OFFER])
 
             if magic == Protocol.MAGIC_COOKIE and m_type == Protocol.MSG_OFFER:
-                # Name Cleanup
                 server_name = name_b.decode('utf-8', 'ignore').replace('\x00', '').strip()
                 print(f"\nFound Server '{server_name}' at {addr[0]}:{port}")
+
+                # Connect and play
                 self.connect(addr[0], port)
+
+                # STOP HERE: Break the loop to finish the program
                 break
 
     def connect(self, ip, port):
@@ -132,7 +135,7 @@ class BlackjackClient:
             self.tcp_socket.connect((ip, port))
             print(f"Connected! Requesting {self.rounds_to_play} rounds.")
 
-            time.sleep(0.1)  # Handshake Stabilizer
+            time.sleep(0.1)
 
             req = struct.pack('!I B B 32s', Protocol.MAGIC_COOKIE, Protocol.MSG_REQUEST, self.rounds_to_play,
                               self.player_name.encode().ljust(32, b'\0'))
@@ -144,12 +147,13 @@ class BlackjackClient:
             print(f"\n🚫 Connection Error: {e}")
         finally:
             if self.tcp_socket: self.tcp_socket.close()
-            print("\n--- Session Finished ---")
+            # Function returns, trigger break in listen_for_offers
 
     def run_game_loop(self):
         rounds_finished = 0
-        self.reset_round()
+        wins = 0
 
+        self.reset_round()
         print("\n--- Round 1 Starting ---")
 
         while rounds_finished < self.rounds_to_play:
@@ -171,20 +175,25 @@ class BlackjackClient:
                     while self.parser.has_complete_message():
                         msg = self.parser.parse_next()
                         if msg:
-                            round_over = self.handle_game_message(msg)
-                            if round_over:
+                            round_result = self.handle_game_message(msg)
+
+                            if round_result != Protocol.RES_NOT_OVER:
+                                if round_result == Protocol.RES_WIN:
+                                    wins += 1
+
                                 rounds_finished += 1
                                 if rounds_finished < self.rounds_to_play:
                                     print(f"\n--- Round {rounds_finished + 1} Starting ---")
                                     self.reset_round()
                                 else:
-                                    print("\n=== All rounds completed! ===")
+                                    # Calculate and print stats
+                                    win_rate = wins / rounds_finished
+                                    print(f"\nFinished playing {rounds_finished} rounds, win rate: {win_rate}")
                                     return
                 except ConnectionResetError:
                     print("\n⚠️ Connection Reset by Server.")
                     return
 
-            # Check User Input
             else:
                 self.check_for_user_input()
 
@@ -197,7 +206,6 @@ class BlackjackClient:
     def handle_game_message(self, msg):
         self.cards_seen += 1
 
-        # --- Logic to Identify Card Owner ---
         owner = "❓ Unknown"
         card_str = f"{msg['rank']} of {msg['suit']}"
 
@@ -205,14 +213,12 @@ class BlackjackClient:
             owner = "🎴 YOUR CARD"
         elif self.cards_seen == 3:
             owner = "🃏 DEALER'S FACE UP"
-            # STORE THIS CARD TO PRINT IT AGAIN LATER
             if msg['rank'] is not None:
                 self.dealer_first_card_str = card_str
         elif self.waiting_for_hit_response:
             owner = "🎴 YOUR CARD (Hit)"
             self.waiting_for_hit_response = False
         else:
-            # If not waiting for a hit, it must be the dealer revealing/hitting
             owner = "🃏 DEALER'S CARD"
 
         if msg['rank'] is not None:
@@ -227,9 +233,9 @@ class BlackjackClient:
             elif res == Protocol.RES_WIN:
                 print("\n=== 🏆 WON 🏆 ===")
             self.game_active = False
-            return True
+            return res
 
-        return False
+        return Protocol.RES_NOT_OVER
 
     def check_for_user_input(self):
         if not self.game_active: return
@@ -245,18 +251,14 @@ class BlackjackClient:
                 self.waiting_for_hit_response = True
                 break
             elif choice == '2':
-                # --- UPDATE: Show ALL Dealer Cards ---
                 print("\n⬇️ --- Dealer's Turn (Revealing Hand) --- ⬇️")
-                # REPRINT THE FIRST CARD so the user sees the full hand
                 if self.dealer_first_card_str:
                     print(f"🃏 DEALER'S CARD: {self.dealer_first_card_str}")
-
                 self.send_command("Stand")
                 self.game_active = False
                 break
 
     def send_command(self, cmd_str):
-        # Format: Magic(4) + Type(1) + Command(5s)
         pkt = struct.pack('!I B 5s', Protocol.MAGIC_COOKIE, Protocol.MSG_PAYLOAD, cmd_str.encode())
         self.tcp_socket.send(pkt)
         print(f"   Sent: {cmd_str}")
